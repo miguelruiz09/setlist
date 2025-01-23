@@ -142,13 +142,15 @@ def show_song_notes(song):
     st.subheader(f"Notas de: {song['title']}")
     st.write(f"**Tonalidad:** {song['key']}")
     st.write(f"**Duración:** {song['duration']} min")
-    st.text_area("Notas", value=song['notes'], disabled=True, height=300)
+    st.markdown("**notes**")
+    st.text_area("Notas", value=song["notes"], disabled=False, height=800, label_visibility="visible")
+    
     if st.button("Volver"):
         st.session_state.current_song = None
         st.rerun()
 
 def show_songs_page():
-    st.title("Base de Datos de Canciones")
+    st.title("Canciones IDJ Cali")
     
     if st.session_state.current_song:
         show_song_notes(st.session_state.current_song)
@@ -238,7 +240,7 @@ def main():
     init_database()
     init_session_state()
     
-    st.sidebar.title("Navegación")
+    st.sidebar.title("Menú")
     page = st.sidebar.radio("Ir a:", ["Canciones", "SetLists"])
     
     if page == "Canciones":

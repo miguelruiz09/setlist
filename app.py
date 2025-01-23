@@ -1,85 +1,97 @@
-
+import os
 import streamlit as st
 import sqlite3
 import bcrypt
 from datetime import datetime
 import json
+import gc
 
-def hash_password(password):
-    """Hashear contraseña de forma segura"""
-    salt = bcrypt.gensalt()
-    return bcrypt.hashpw(password.encode(), salt)
+def restore():
+    gc.collect()
+    if os.path.exists('setlist.db'):
+        try:
+            os.remove('setlist.db')
+        except PermissionError as e:
+            print(f"Error al intentar eliminar la base de datos: {e}")
 
-def verify_password(stored_password, provided_password):
-    """Verificar contraseña contra hash almacenado"""
-    # Asegurar que stored_password sea bytes
-    if isinstance(stored_password, str):
-        stored_password = stored_password.encode('utf-8')
+def reset_database():
+    restore()
+    conn = sqlite3.connect('setlist.db')
+    c = conn.cursor()
     
-    return bcrypt.checkpw(provided_password.encode('utf-8'), stored_password)
-
-def init_database():
-    """Inicializar base de datos con tablas y usuarios por defecto"""
+    c.execute('''CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        password TEXT NOT NULL,
+        role TEXT NOT NULL
+    )''')
+    
+    c.execute('''CREATE TABLE IF NOT EXISTS songs (
+        id INTEGER PRIMARY KEY,
+        title TEXT NOT NULL,
+        key TEXT,
+        notes TEXT
+    )''')
+    
+    c.execute('''CREATE TABLE IF NOT EXISTS setlists (
+        id INTEGER PRIMARY KEY,
+        user_id INTEGER,
+        name TEXT NOT NULL,
+        date TEXT,
+        songs TEXT,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+    )''')
+    
     try:
-        conn = sqlite3.connect('setlist_helper.db')
-        c = conn.cursor()
-        
-        # Crear tablas
-        c.execute('''CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY,
-            username TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL,
-            role TEXT NOT NULL
-        )''')
-        
-        # Verificar si ya existen usuarios
-        c.execute('SELECT * FROM users WHERE username = ?', ("admin",))
-        if not c.fetchone():
-            # Crear usuarios con contraseñas hasheadas correctamente
-            admin_pass = bcrypt.hashpw("admin123".encode(), bcrypt.gensalt())
+        c.execute("SELECT COUNT(*) FROM users WHERE username = ?", ("admin",))
+        if c.fetchone()[0] == 0:
+            admin_pass = bcrypt.hashpw("admin123".encode('utf-8'), bcrypt.gensalt())
             c.execute('''
                 INSERT INTO users (username, password, role) 
                 VALUES (?, ?, ?)
             ''', ("admin", admin_pass, "admin"))
-            
-            user_pass = bcrypt.hashpw("user123".encode(), bcrypt.gensalt())
+        
+        c.execute("SELECT COUNT(*) FROM users WHERE username = ?", ("usuario",))
+        if c.fetchone()[0] == 0:
+            user_pass = bcrypt.hashpw("user123".encode('utf-8'), bcrypt.gensalt())
             c.execute('''
                 INSERT INTO users (username, password, role) 
                 VALUES (?, ?, ?)
             ''', ("usuario", user_pass, "user"))
-        
-        conn.commit()
     except sqlite3.Error as e:
-        print(f"Error de inicialización de base de datos: {e}")
-    finally:
-        conn.close()
+        st.error(f"Error al insertar usuarios: {e}")
+    
+    conn.commit()
+    conn.close()
+
+def verify_password(stored_password, provided_password):
+    if isinstance(stored_password, str):
+        stored_password = stored_password.encode('utf-8')
+    return bcrypt.checkpw(provided_password.encode('utf-8'), stored_password)
 
 def login_user(username, password):
-    """Autenticar usuario"""
     try:
-        conn = sqlite3.connect('setlist_helper.db')
+        conn = sqlite3.connect('setlist.db')
         c = conn.cursor()
         
         c.execute('SELECT * FROM users WHERE username = ?', (username,))
         user = c.fetchone()
         
-        if user:
-            if verify_password(user[2], password):
-                return {
-                    "id": user[0],
-                    "username": user[1],
-                    "role": user[3]
-                }
+        if user and verify_password(user[2], password):
+            return {
+                "id": user[0],
+                "username": user[1],
+                "role": user[3]
+            }
         return None
     except sqlite3.Error as e:
-        print(f"Error de inicio de sesión: {e}")
+        st.error(f"Error de inicio de sesión: {e}")
         return None
     finally:
         conn.close()
-        
+
 def login_page():
-    """Página de inicio de sesión"""
-    st.title("SetList Helper 🎵")
+    st.title("SetList IDJ Cali 🎵")
     
     username = st.text_input("Usuario")
     password = st.text_input("Contraseña", type="password")
@@ -89,152 +101,16 @@ def login_page():
         if user:
             st.session_state.logged_in = True
             st.session_state.user = user
-            st.experimental_rerun()
+            st.rerun()
         else:
             st.error("Credenciales incorrectas")
 
-def main():
-    init_database()
-    
-    # Inicializar estado de sesión
-    if 'logged_in' not in st.session_state:
-        st.session_state.logged_in = False
-        st.session_state.user = None
-        st.session_state.current_song = None
-    
-    # Lógica de navegación
-    if not st.session_state.logged_in:
-        login_page()
-    else:
-        # Menú de navegación para usuarios logueados
-        st.sidebar.title(f"Bienvenido, {st.session_state.user['username']}")
-        options = ["Inicio"]
-        
-        if st.session_state.user['role'] == 'admin':
-            options.extend(["Gestionar Canciones", "Gestionar SetLists"])
-        
-        options.extend(["Mis SetLists", "Cerrar Sesión"])
-        choice = st.sidebar.radio("Menú", options)
-        
-        # Resto del código de navegación
-        if choice == "Inicio":
-            st.title("SetList Helper 🎵")
-            st.markdown("""
-            ## Bienvenido a la aplicación de gestión de SetLists
-            - Crea y gestiona tus SetLists musicales
-            - Guarda canciones con detalles personalizados
-            - Organiza tus repertorios
-            """)
-        elif choice == "Gestionar Canciones":
-            manage_songs_page()
-        elif choice == "Mis SetLists":
-            show_setlists_page()
-        elif choice == "Cerrar Sesión":
-            st.session_state.logged_in = False
-            st.session_state.user = None
-            st.experimental_rerun()
-
-def manage_songs_page():
-    """Página de gestión de canciones para admin"""
-    st.title("Gestionar Canciones")
-    
-    # Formulario para agregar canción
-    with st.form("add_song_form"):
-        title = st.text_input("Título de la Canción")
-        key = st.text_input("Clave Musical")
-        duration = st.number_input("Duración (minutos)", min_value=0)
-        notes = st.text_area("Notas Adicionales")
-        
-        submit = st.form_submit_button("Agregar Canción")
-        
-        if submit:
-            try:
-                conn = sqlite3.connect('setlist_helper.db')
-                c = conn.cursor()
-                c.execute('''
-                    INSERT INTO songs (title, key, duration, notes)
-                    VALUES (?, ?, ?, ?)
-                ''', (title, key, duration, notes))
-                conn.commit()
-                st.success("Canción agregada exitosamente!")
-            except sqlite3.Error as e:
-                st.error(f"Error al agregar canción: {e}")
-            finally:
-                conn.close()
-    
-    # Mostrar canciones existentes
-    songs = get_all_songs()
-    if songs:
-        st.subheader("Canciones Existentes")
-        for song in songs:
-            col1, col2 = st.columns([4,1])
-            with col1:
-                st.write(f"{song['title']} ({song['key']})")
-            with col2:
-                if st.button(f"Eliminar {song['id']}", key=f"del_song_{song['id']}"):
-                    try:
-                        conn = sqlite3.connect('setlist_helper.db')
-                        c = conn.cursor()
-                        c.execute('DELETE FROM songs WHERE id = ?', (song['id'],))
-                        conn.commit()
-                        st.success("Canción eliminada!")
-                        st.rerun()
-                    except sqlite3.Error as e:
-                        st.error(f"Error al eliminar canción: {e}")
-                    finally:
-                        conn.close()
-
-def show_setlists_page():
-    """Página para mostrar y crear SetLists"""
-    st.title("Mis SetLists")
-    
-    songs = get_all_songs()
-    with st.form("setlist_form"):
-        setlist_name = st.text_input("Nombre del SetList")
-        setlist_date = st.date_input("Fecha del SetList", datetime.now())
-        
-        available_songs = {f"{song['id']}. {song['title']} ({song['key']})": song 
-                         for song in songs}
-        
-        selected_songs = st.multiselect(
-            "Selecciona y ordena las canciones",
-            options=list(available_songs.keys())
-        )
-        
-        submitted = st.form_submit_button("Crear SetList")
-        
-        if submitted and setlist_name and selected_songs:
-            songs_for_setlist = [available_songs[song] for song in selected_songs]
-            save_setlist(
-                setlist_name,
-                setlist_date.strftime("%Y-%m-%d"),
-                songs_for_setlist
-            )
-            st.success("SetList creado!")
-    
-    # Mostrar SetLists existentes
-    setlists = get_all_setlists()
-    if setlists:
-        st.subheader("SetLists Guardados")
-        for setlist in setlists:
-            col1, col2 = st.columns([4,1])
-            with col1:
-                with st.expander(f"{setlist['name']} - {setlist['date']}"):
-                    for song in setlist['songs']:
-                        st.write(f"{song['title']} ({song['key']})")
-            with col2:
-                if st.button("Eliminar", key=f"del_setlist_{setlist['id']}"):
-                    delete_setlist(setlist['id'])
-                    st.success("SetList eliminado!")
-                    st.rerun()
-
 def get_all_songs():
-    """Obtener todas las canciones"""
     try:
-        conn = sqlite3.connect('setlist_helper.db')
+        conn = sqlite3.connect('setlist.db')
         c = conn.cursor()
         c.execute('SELECT * FROM songs')
-        columns = ['id', 'title', 'key', 'duration', 'notes']
+        columns = ['id', 'title', 'key', 'notes']
         return [dict(zip(columns, row)) for row in c.fetchall()]
     except sqlite3.Error as e:
         st.error(f"Error al recuperar canciones: {e}")
@@ -243,9 +119,8 @@ def get_all_songs():
         conn.close()
 
 def save_setlist(name, date, songs):
-    """Guardar un nuevo SetList"""
     try:
-        conn = sqlite3.connect('setlist_helper.db')
+        conn = sqlite3.connect('setlist.db')
         c = conn.cursor()
         
         c.execute('''
@@ -263,10 +138,22 @@ def save_setlist(name, date, songs):
     finally:
         conn.close()
 
+def view_notes_page():
+    song = st.session_state.selected_song
+    st.title(f"Notas de la canción: {song['title']}")
+    
+    notes = song.get('notes', 'Sin notas disponibles')
+    st.text_area("Notas", value=notes, height=800, disabled=False)
+    
+    if st.button("Volver"):
+        st.session_state.current_page = st.session_state.previous_page
+        st.session_state.selected_song = None
+        del st.session_state.previous_page
+        st.rerun()
+
 def get_all_setlists():
-    """Obtener todos los SetLists del usuario actual"""
     try:
-        conn = sqlite3.connect('setlist_helper.db')
+        conn = sqlite3.connect('setlist.db')
         c = conn.cursor()
         
         c.execute('''
@@ -293,9 +180,8 @@ def get_all_setlists():
         conn.close()
 
 def delete_setlist(setlist_id):
-    """Eliminar un SetList específico"""
     try:
-        conn = sqlite3.connect('setlist_helper.db')
+        conn = sqlite3.connect('setlist.db')
         c = conn.cursor()
         
         c.execute('DELETE FROM setlists WHERE id = ?', (setlist_id,))
@@ -305,5 +191,255 @@ def delete_setlist(setlist_id):
     finally:
         conn.close()
 
+def manage_songs_page():
+    st.title("Gestionar Canciones")
+    
+    if 'editing_song' not in st.session_state:
+        st.session_state.editing_song = None
+
+    with st.form("song_form", clear_on_submit=True):
+        if st.session_state.editing_song:
+            song = st.session_state.editing_song
+            title = st.text_input("Título de la Canción", value=song['title'])
+            key = st.text_input("Clave Musical", value=song.get('key', ''))
+            notes = st.text_area("Notas Adicionales", value=song.get('notes', ''))
+        else:
+            title = st.text_input("Título de la Canción")
+            key = st.text_input("Clave Musical")
+            notes = st.text_area("Notas Adicionales")
+
+        submit = st.form_submit_button("Guardar Canción")
+        
+        if submit:
+            try:
+                conn = sqlite3.connect('setlist.db')
+                c = conn.cursor()
+                
+                if st.session_state.editing_song:
+                    c.execute('''
+                        UPDATE songs 
+                        SET title = ?, key = ?, notes = ? 
+                        WHERE id = ?
+                    ''', (title, key, notes, st.session_state.editing_song['id']))
+                    st.success("Canción actualizada exitosamente!")
+                    st.session_state.editing_song = None
+                else:
+                    c.execute('''
+                        INSERT INTO songs (title, key, notes)
+                        VALUES (?, ?, ?)
+                    ''', (title, key, notes))
+                    st.success("Canción agregada exitosamente!")
+                
+                conn.commit()
+            except sqlite3.Error as e:
+                st.error(f"Error al guardar canción: {e}")
+            finally:
+                conn.close()
+    
+    search_term = st.text_input("Buscar canciones...")
+    
+    songs = get_all_songs()
+    filtered_songs = [
+        song for song in songs 
+        if search_term.lower() in song['title'].lower() 
+        or search_term.lower() in song.get('key', '').lower()
+    ]
+    
+    songs_per_page = 5
+    total_songs = len(filtered_songs)
+    total_pages = max(1, (total_songs - 1) // songs_per_page + 1)
+    
+    current_page = st.number_input(
+        "Página", 
+        min_value=1, 
+        max_value=total_pages, 
+        value=1
+    ) - 1
+    
+    start_idx = current_page * songs_per_page
+    end_idx = start_idx + songs_per_page
+    page_songs = filtered_songs[start_idx:end_idx]
+    
+    if page_songs:
+        st.subheader(f"Canciones Existentes (Página {current_page + 1} de {total_pages})")
+        for song in page_songs:
+            col1, col2, col3, col4 = st.columns([4, 1, 1, 1])
+            with col1:
+                st.write(f"{song['title']} ({song.get('key', 'Sin clave')})")
+            with col2:
+                if st.button("Editar", key=f"edit_song_{song['id']}"):
+                    st.session_state.editing_song = song
+                    st.rerun()
+            with col3:
+                if st.button("Eliminar", key=f"del_song_{song['id']}"):
+                    try:
+                        conn = sqlite3.connect('setlist.db')
+                        c = conn.cursor()
+                        c.execute('DELETE FROM songs WHERE id = ?', (song['id'],))
+                        conn.commit()
+                        st.success("Canción eliminada!")
+                        st.rerun()
+                    except sqlite3.Error as e:
+                        st.error(f"Error al eliminar canción: {e}")
+                    finally:
+                        conn.close()
+            with col4:
+                if st.button("Ver Notas", key=f"view_notes_song_{song['id']}"):
+                    st.session_state.previous_page = st.session_state.current_page
+                    st.session_state.current_page = "View Notes"
+                    st.session_state.selected_song = song
+                    st.rerun()
+        
+        st.write(f"Total de canciones: {total_songs}")
+    else:
+        st.write("No se encontraron canciones.")
+
+def show_setlists_page():
+    st.title("Mis SetLists")
+    
+    songs = get_all_songs()
+    with st.form("setlist_form"):
+        setlist_name = st.text_input("Nombre del SetList")
+        setlist_date = st.date_input("Fecha del SetList", datetime.now())
+        
+        available_songs = {f"{song['id']}. {song['title']} ({song['key']})": song 
+                         for song in songs}
+        
+        selected_songs = st.multiselect(
+            "Selecciona y ordena las canciones",
+            options=list(available_songs.keys())
+        )
+        
+        submitted = st.form_submit_button("Crear SetList")
+        
+        if submitted and setlist_name and selected_songs:
+            songs_for_setlist = [available_songs[song] for song in selected_songs]
+            save_setlist(
+                setlist_name,
+                setlist_date.strftime("%Y-%m-%d"),
+                songs_for_setlist
+            )
+            st.success("SetList creado!")
+    
+    setlists = get_all_setlists()
+    if setlists:
+        st.subheader("SetLists Guardados")
+        for setlist in setlists:
+            col1, col2 = st.columns([4,1])
+            with col1:
+                with st.expander(f"{setlist['name']} - {setlist['date']}"):
+                    for song in setlist['songs']:
+                        st.write(f"{song['title']} ({song['key']})")
+                        
+                        if st.button("Ver Notas", key=f"view_notes_{song['id']}"):
+                            st.session_state.previous_page = st.session_state.current_page
+                            st.session_state.current_page = "View Notes"
+                            st.session_state.selected_song = song
+                            st.rerun()
+            with col2:
+                if st.button("Eliminar", key=f"del_setlist_{setlist['id']}"):
+                    delete_setlist(setlist['id'])
+                    st.success("SetList eliminado!")
+                    st.rerun()
+
+def change_password(user_id, current_password, new_password):
+    try:
+        conn = sqlite3.connect('setlist.db')
+        c = conn.cursor()
+        
+        # Verify current password
+        c.execute('SELECT password FROM users WHERE id = ?', (user_id,))
+        stored_password = c.fetchone()[0]
+        
+        if not verify_password(stored_password, current_password):
+            return False, "La contraseña actual es incorrecta"
+        
+        # Hash and update new password
+        new_password_hash = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt())
+        c.execute('UPDATE users SET password = ? WHERE id = ?', (new_password_hash, user_id))
+        conn.commit()
+        return True, "Contraseña actualizada exitosamente"
+    except sqlite3.Error as e:
+        return False, f"Error al cambiar la contraseña: {e}"
+    finally:
+        conn.close()
+
+def change_password_page():
+    st.title("Cambiar Contraseña")
+    
+    current_password = st.text_input("Contraseña Actual", type="password")
+    new_password = st.text_input("Nueva Contraseña", type="password")
+    confirm_password = st.text_input("Confirmar Nueva Contraseña", type="password")
+    
+    if st.button("Cambiar Contraseña"):
+        if new_password != confirm_password:
+            st.error("Las nuevas contraseñas no coinciden")
+        elif len(new_password) < 6:
+            st.error("La nueva contraseña debe tener al menos 6 caracteres")
+        else:
+            success, message = change_password(st.session_state.user['id'], current_password, new_password)
+            if success:
+                st.success(message)
+            else:
+                st.error(message)
+
+def main():
+    if not os.path.exists('setlist.db'):
+        reset_database()
+
+    if 'logged_in' not in st.session_state:
+        st.session_state.logged_in = False
+        st.session_state.user = None
+
+    if 'current_page' not in st.session_state:
+        st.session_state.current_page = "Inicio"
+
+    if 'selected_song' not in st.session_state:
+        st.session_state.selected_song = None
+
+    if 'previous_page' not in st.session_state:
+        st.session_state.previous_page = None
+
+    if not st.session_state.logged_in:
+        login_page()
+    else:
+        if st.session_state.current_page == "View Notes" and st.session_state.selected_song:
+            view_notes_page()
+        else:
+            # Guarda la página actual antes de cambiar
+            previous_page = st.session_state.current_page
+            
+            st.sidebar.title(f"Bienvenido, {st.session_state.user['username']}")
+            options = ["Inicio"]
+            if st.session_state.user['role'] == 'admin':
+                options.extend(["Gestionar Canciones"])
+            options.extend(["Mis SetLists", "Cambiar Contraseña", "Cerrar Sesión"])
+            choice = st.sidebar.radio("Menú", options)
+
+            # Actualiza la página actual y guarda la anterior
+            if choice != st.session_state.current_page:
+                st.session_state.previous_page = previous_page
+                st.session_state.current_page = choice
+
+            if choice == "Inicio":
+                st.title("SetList IDJ Cali 🎵")
+                st.markdown("""
+                ## Bienvenido a la aplicación de gestión de SetLists
+                - Crea y gestiona tus SetLists musicales
+                - Guarda canciones con detalles personalizados
+                - Organiza tus repertorios
+                """)
+            elif choice == "Gestionar Canciones":
+                manage_songs_page()
+            elif choice == "Mis SetLists":
+                show_setlists_page()
+            elif choice == "Cambiar Contraseña":
+                change_password_page()
+            elif choice == "Cerrar Sesión":
+                st.session_state.logged_in = False
+                st.session_state.user = None
+                st.rerun()
+
 if __name__ == "__main__":
     main()
+

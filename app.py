@@ -1,7 +1,7 @@
+import bcrypt
 import os
 import streamlit as st
 import sqlite3
-import bcrypt
 from datetime import datetime
 import json
 import gc

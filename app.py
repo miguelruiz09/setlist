@@ -426,16 +426,17 @@ def view_notes_page():
     song = st.session_state.selected_song
     st.title(f"Acordes de la canción: {song['title']}")
     
+    # Incluir más detalles de la canción
+    st.write(f"Tono: {song.get('key', 'No especificado')}")
+    st.write(f"Tempo: {song.get('tempo', 'No especificado')}")
+    
     notes = song.get('notes', 'Sin notas disponibles')
     st.text_area("Acordes", value=notes, height=800, disabled=False)
     
-    # Botón para volver a la página anterior
     if st.button("Volver"):
-        # Si la página anterior es válida, volvemos allí
-        if st.session_state.previous_page:
-            st.session_state.current_page = st.session_state.previous_page
-            st.rerun()  # Esto actualiza la página a la anterior
+        st.session_state.current_page = st.session_state.previous_page
         st.session_state.selected_song = None
+        st.rerun()
 
 
 

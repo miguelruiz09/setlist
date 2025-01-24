@@ -111,7 +111,7 @@ def get_all_songs():
         conn = sqlite3.connect('setlist3.db')
         c = conn.cursor()
         c.execute('SELECT * FROM songs')
-        columns = ['id', 'title', 'key', 'notes']
+        columns = ['id', 'title', 'key', 'tempo', 'notes']
         return [dict(zip(columns, row)) for row in c.fetchall()]
     except sqlite3.Error as e:
         st.error(f"Error al recuperar canciones: {e}")

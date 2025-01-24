@@ -289,7 +289,7 @@ def show_setlists_page():
 
     songs = get_all_songs()
     with st.form("setlist_form"):
-        setlist_name = st.text_input("Nombre del SetList")
+        setlist_name = st.text_input("Dirige")
         setlist_date = st.date_input("Fecha del SetList", datetime.now())
 
         available_songs = {f"{song['id']}. {song['title']} ({song['key']})": song
@@ -427,8 +427,8 @@ def view_notes_page():
     st.title(f"Acordes de la canción: {song['title']}")
     
     # Incluir más detalles de la canción
-    st.write(f"Tono: {song.get('key', 'No especificado')}")
-    st.write(f"Tempo: {song.get('tempo', 'No especificado')}")
+    st.write(f"Tempo: {song.get('key', 'No especificado')}")
+    st.write(f"Tono: {song.get('tempo', 'No especificado')}")
     
     notes = song.get('notes', 'Sin notas disponibles')
     st.text_area("Acordes", value=notes, height=800, disabled=False)
